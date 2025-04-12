@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>QMK Snippet Manager</title>
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="favicon.ico" type="image/x-icon">
+  <style>
+    :root {
+      /* Bubble Tea / Charm-inspired color scheme */
+      --primary-color: #FF5F87;
+      --primary-hover: #FF3A70;
+      --secondary-color: #5AF78E;
+      --secondary-hover: #36D873;
+      --danger-color: #FF6AC1;
+      --danger-hover: #FF4AB6;
+      --background: #282C34;
+      --card-bg: #1E222A;
+      --card-header: #323842;
+      --divider-color: #454C5E;
+      --text-primary: #F8F8F2;
+      --text-secondary: #ABB2BF;
+      --border-color: #454C5E;
+      --success-bg: #253028;
+      --success-color: #5AF78E;
+      --error-bg: #3E2A35;
+      --error-color: #FF6E6E;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Cascadia Code', 'Fira Code', monospace;
+      margin: 0;
+      padding: 20px;
+      background-color: var(--background);
+      color: var(--text-primary);
+      line-height: 1.6;
+    }
+
+    .container {
+      max-width: 1000px;
+      margin: 0 auto;
+      background-color: var(--card-bg);
+      padding: 0;
+      border-radius: 6px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+      overflow: hidden;
+      border: 1px solid var(--divider-color);
+    }
+
+    h1, h2, h3 {
+      color: var(--text-primary);
+      margin-bottom: 20px;
+      font-weight: 600;
+    }
+
+    h1 {
+      text-align: center;
+      font-size: 26px;
+      margin: 0;
+      padding: 18px;
+      background-color: var(--primary-color);
+      color: #000000;
+      letter-spacing: 1px;
+    }
+
+    h2 {
+      font-size: 22px;
+      color: var(--primary-color);
+      padding: 15px 20px;
+      margin: 0;
+      background-color: var(--card-header);
+      border-top: 1px solid var(--divider-color);
+      border-bottom: 1px solid var(--divider-color);
+    }
+
+    h3 {
+      font-size: 18px;
+      margin-top: 20px;
+      color: var(--secondary-color);
+    }
+
+    .content-section {
+      padding: 20px;
+    }
+
+    button {
+      background-color: var(--card-header);
+      color: var(--primary-color);
+      border: 1px solid var(--primary-color);
+      padding: 10px 16px;
+      margin: 8px 4px;
+      border-radius: 2px;
+      cursor: pointer;
+      font-weight: 500;
+      font-size: 14px;
+      min-width: 140px;
+      font-family: 'Cascadia Code', 'Fira Code', monospace;
+      transition: all 0.15s;
+      letter-spacing: 0.5px;
+    }
+
+    button:hover {
+      background-color: var(--primary-color);
+      color: #000000;
+    }
+
+    button:active {
+      transform: translateY(1px);
+      filter: brightness(90%);
+    }
+
+    button:disabled {
+      opacity: 0.5;
+      border-color: var(--divider-color);
+      color: var(--divider-color);
+      cursor: not-allowed;
+    }
+
+    .action-row {
+      display: flex;
+      justify-content: flex-start;
+      margin: 15px 0;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    select, input, textarea {
+      padding: 10px 12px;
+      margin: 10px 0;
+      border: 1px solid var(--border-color);
+      border-radius: 2px;
+      width: 100%;
+      font-family: 'Cascadia Code', 'Fira Code', monospace;
+      font-size: 14px;
+      background-color: var(--card-bg);
+      color: var(--text-primary);
+      transition: all 0.15s;
+    }
+
+    select:focus, input:focus, textarea:focus {
+      outline: none;
+      border-color: var(--primary-color);
+      box-shadow: 0 0 0 2px rgba(255, 95, 135, 0.2);
+    }
+
+    textarea {
+      resize: vertical;
+      min-height: 120px;
+      line-height: 1.4;
+    }
+
+    #device-list {
+      height: 250px;
+      margin: 15px 0;
+      font-size: 14px;
+      background-color: var(--card-bg);
+      color: var(--text-primary);
+      border: 1px solid var(--border-color);
+    }
+    
+    #device-list option {
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--border-color);
+    }
+    
+    #device-list option:hover {
+      background-color: var(--card-header);
+    }
+
+    .device-info {
+      margin: 0;
+      padding: 20px;
+      background-color: rgba(255, 95, 135, 0.1);
+      border-bottom: 1px solid var(--divider-color);
+    }
+
+    .device-info h3 {
+      color: var(--primary-color);
+      margin-top: 0;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 20px 0;
+      overflow: hidden;
+      border: 1px solid var(--divider-color);
+    }
+
+    th, td {
+      padding: 12px 16px;
+      text-align: left;
+      border: none;
+    }
+
+    th {
+      background-color: var(--card-header);
+      color: var(--primary-color);
+      font-weight: 600;
+      font-size: 14px;
+      letter-spacing: 0.5px;
+      border-bottom: 2px solid var(--primary-color);
+    }
+
+    td {
+      border-bottom: 1px solid var(--divider-color);
+      font-size: 14px;
+    }
+
+    tr:last-child td {
+      border-bottom: none;
+    }
+
+    tr:nth-child(even) {
+      background-color: rgba(90, 247, 142, 0.05);
+    }
+
+    tr:hover {
+      background-color: rgba(255, 95, 135, 0.1);
+    }
+
+    .snippet-editor {
+      margin: 20px 0;
+      display: none;
+      padding: 20px;
+      background-color: var(--card-header);
+      border-radius: 4px;
+      border: 1px solid var(--divider-color);
+    }
+
+    label {
+      display: block;
+      margin-top: 15px;
+      margin-bottom: 5px;
+      font-weight: 500;
+      color: var(--secondary-color);
+      font-size: 14px;
+      letter-spacing: 0.5px;
+    }
+
+    #device-selection, #connected-device, #snippet-manager {
+      transition: opacity var(--transition-speed) ease;
+    }
+
+    .status {
+      margin: 20px;
+      padding: 12px 16px;
+      border-radius: 2px;
+      font-weight: 500;
+      font-size: 14px;
+      font-family: 'Cascadia Code', 'Fira Code', monospace;
+      transition: opacity 0.3s ease;
+      border: 1px solid var(--divider-color);
+    }
+
+    .status.success {
+      background-color: var(--success-bg);
+      color: var(--success-color);
+      border-left: 3px solid var(--success-color);
+    }
+
+    .status.error {
+      background-color: var(--error-bg);
+      color: var(--error-color);
+      border-left: 3px solid var(--error-color);
+    }
+
+    .edit-btn {
+      background-color: var(--card-header);
+      color: var(--secondary-color);
+      border: 1px solid var(--secondary-color);
+      min-width: 80px;
+    }
+
+    .edit-btn:hover {
+      background-color: var(--secondary-color);
+      color: #000000;
+    }
+
+    .delete-btn {
+      background-color: var(--card-header);
+      color: var(--danger-color);
+      border: 1px solid var(--danger-color);
+      min-width: 80px;
+    }
+
+    .delete-btn:hover {
+      background-color: var(--danger-color);
+      color: #000000;
+    }
+
+    #device-details {
+      background-color: var(--card-bg);
+      padding: 15px;
+      border-radius: 2px;
+      border: 1px solid var(--divider-color);
+      margin-top: 15px;
+    }
+
+    #device-details p {
+      margin: 8px 0;
+      font-size: 14px;
+      border-bottom: 1px solid var(--divider-color);
+      padding-bottom: 8px;
+      font-family: 'Cascadia Code', 'Fira Code', monospace;
+    }
+
+    #device-details p:last-child {
+      border-bottom: none;
+    }
+
+    #device-details strong {
+      color: var(--secondary-color);
+      display: inline-block;
+      width: 130px;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(-10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>✨ QMK Snippet Manager ✨</h1>
+
+    <div id="device-selection">
+      <h2>Connect to Keyboard</h2>
+      
+      <div class="content-section">
+        <div class="action-row">
+          <button id="refresh-devices">Refresh Devices</button>
+        </div>
+        
+        <select id="device-list" size="5"></select>
+        
+        <div class="action-row">
+          <button id="connect-device" disabled>Connect</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="connected-device" class="device-info" style="display: none;">
+      <h3>Connected Device</h3>
+      <div id="device-details"></div>
+      
+      <div class="action-row">
+        <button id="disconnect-device">Disconnect</button>
+      </div>
+    </div>
+
+    <div id="snippet-manager" style="display: none;">
+      <h2>Snippet Manager</h2>
+      
+      <div class="content-section">
+        <div class="action-row">
+          <button id="read-snippets">Read Snippets</button>
+          <button id="add-snippet">Add New Snippet</button>
+        </div>
+
+        <table id="snippet-table">
+          <thead>
+            <tr>
+              <th>Trigger</th>
+              <th>Snippet</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <!-- Snippets will be loaded here -->
+          </tbody>
+        </table>
+
+        <div id="snippet-editor" class="snippet-editor">
+          <h3>Edit Snippet</h3>
+          <input type="hidden" id="snippet-id">
+          
+          <label for="trigger">Trigger:</label>
+          <input type="text" id="trigger" placeholder="Enter trigger word">
+          
+          <label for="snippet-text">Snippet:</label>
+          <textarea id="snippet-text" rows="6"></textarea>
+          
+          <div class="action-row">
+            <button id="save-snippet">Save</button>
+            <button id="cancel-edit">Cancel</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="status" class="status" style="display: none;"></div>
+  </div>
+
+  <script src="./dist/renderer.js"></script>
+</body>
+</html>
