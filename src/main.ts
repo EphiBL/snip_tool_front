@@ -140,7 +140,6 @@ ipcMain.handle('disconnect-device', async (): Promise<{ success: boolean; messag
   }
 });
 
-
 // QMK Snippet Protocol Handlers
 // These would need to be adapted to match your actual keyboard's protocol
 
@@ -152,7 +151,7 @@ const QMK_CMD = {
   DELETE_SNIPPET: 0x04
 };
 
-const PACKET_SIZE = 32;
+const PACKET_SIZE = 32; // 1 report id added by node-hid but stripped by qmk when received + 32 data bytes
 const HEADER_SIZE = 3;
 const DATA_SIZE = PACKET_SIZE - HEADER_SIZE - 1; // -1 for the checksum byte
 const SEQ = {
@@ -161,6 +160,74 @@ const SEQ = {
   END: 0x03,
   SINGLE: 0x04
 };
+
+// Ping device to test the connection
+ipcMain.handle('ping-device', async (): Promise<{ success: boolean; message: string } | { error: string }> => {
+  try {
+    if (!connectedDevice || !connectedDevice.device) {
+      return { error: 'No device connected' };
+    }
+    
+    const packet = new Array(PACKET_SIZE).fill(0);
+
+    // Packet[0] is the report ID added by node-hid when .write() is called, qmk strips this leaving 32 data bytes
+    packet[1] = 0x01; 
+    packet[2] = 0x02;     
+    packet[3] = 0x03;
+    packet[4] = 0x04;
+    packet[5] = 0x05;
+    packet[10] = 0xFF; 
+    packet[30] = 0x30;
+    
+    console.log('Sending packet:', packet);
+    console.log('Packet hex:', packet.map(b => b.toString(16).padStart(2, '0')).join(' '));
+    
+    // Send the formatted packet
+    connectedDevice.device.write(packet);
+    
+    try {
+      // Try to read a response with timeout
+      const response = connectedDevice.device.readTimeout(1000); // 1 second timeout
+      
+      // Check if we got a valid response
+      if (response && response.length > 0) {
+        // Log the response for debugging
+        console.log('Ping response received:', response);
+        // Convert to hex for clearer output
+        const hexResponse = Array.from(response)
+          .map(byte => byte.toString(16).padStart(2, '0'))
+          .join(' ');
+        console.log('Ping response (hex):', hexResponse);
+        
+        // Typically you'd validate the response here according to your protocol
+        return { success: true, message: 'Device responded to ping' };
+      } else {
+        return { error: 'No response received from device' };
+      }
+    } catch (readError) {
+      console.warn('Ping timeout or error:', readError);
+      return { error: 'Device did not respond to ping' };
+    }
+  } catch (error) {
+    console.error('Error pinging device:', error);
+    return { error: (error as Error).message };
+  }
+});
+
+
+
+
+// Utility function to encode string to byte array
+function encodeString(str: string): number[] {
+  // Simple implementation - can be expanded based on requirements
+  return Array.from(Buffer.from(str, 'utf8'));
+}
+
+// Function to parse the HID response into snippets
+function parseSnippetsFromResponse(response: number[] | Buffer): Snippet[] {
+  // Empty template implementation
+  return [];
+}
 
 // Read snippets from keyboard
 // Example code from claude non-final

@@ -19,7 +19,7 @@ interface HidAPI {
   listDevices: () => Promise<any>;
   connectDevice: (deviceInfo: DeviceInfo) => Promise<any>;
   disconnectDevice: () => Promise<any>;
-  sendData: (data: number | number[]) => Promise<any>;
+  pingDevice: () => Promise<any>;
   
   // Snippet operations
   readSnippets: () => Promise<any>;
@@ -33,7 +33,7 @@ contextBridge.exposeInMainWorld('hidAPI', {
   listDevices: () => ipcRenderer.invoke('list-devices'),
   connectDevice: (deviceInfo: DeviceInfo) => ipcRenderer.invoke('connect-device', deviceInfo),
   disconnectDevice: () => ipcRenderer.invoke('disconnect-device'),
-  sendData: (data: number | number[]) => ipcRenderer.invoke('send-data', data),
+  pingDevice: () => ipcRenderer.invoke('ping-device'),
   
   // Snippet operations
   readSnippets: () => ipcRenderer.invoke('read-snippets'),

@@ -4,7 +4,7 @@ interface HidAPI {
   listDevices: () => Promise<any>;
   connectDevice: (deviceInfo: DeviceInfo) => Promise<any>;
   disconnectDevice: () => Promise<any>;
-  sendData: (data: number | number[]) => Promise<any>;
+  pingDevice: () => Promise<any>;
   
   // Snippet operations
   readSnippets: () => Promise<any>;
@@ -56,6 +56,7 @@ const snippetTextEl = document.getElementById('snippet-text') as HTMLTextAreaEle
 const saveSnippetBtn = document.getElementById('save-snippet') as HTMLButtonElement;
 const cancelEditBtn = document.getElementById('cancel-edit') as HTMLButtonElement;
 const statusEl = document.getElementById('status') as HTMLDivElement;
+const pingDeviceBtn = document.createElement('button') as HTMLButtonElement;
 
 // Store current device and snippets
 let currentDevice: DeviceInfo | null = null;
@@ -233,6 +234,17 @@ function showConnectedDeviceInfo(deviceInfo: DeviceInfo): void {
     deviceSelection.style.display = 'none';
     deviceSelection.style.opacity = '1';
   }, 300);
+
+  // Add ping button to the device action row
+  const actionRow = connectedDeviceEl.querySelector('.action-row') as HTMLDivElement;
+  
+  // Configure ping button
+  pingDeviceBtn.id = 'ping-device';
+  pingDeviceBtn.textContent = 'Ping Device';
+  pingDeviceBtn.addEventListener('click', pingConnectedDevice);
+  
+  // Add the button before the disconnect button
+  actionRow.insertBefore(pingDeviceBtn, disconnectBtn);
 }
 
 async function disconnectFromDevice(): Promise<void> {
@@ -451,6 +463,28 @@ async function deleteSnippet(id: number): Promise<void> {
     }
   } catch (error) {
     showStatus(`Error deleting snippet: ${(error as Error).message}`, true);
+  }
+}
+
+// Ping device function
+async function pingConnectedDevice(): Promise<void> {
+  try {
+    showStatus('Pinging device...');
+    
+    const result = await window.hidAPI.pingDevice();
+    
+    if ('error' in result) {
+      showStatus(`Ping failed: ${result.error}`, true);
+      return;
+    }
+    
+    if ('success' in result && result.success) {
+      showStatus('Device ping successful!');
+    } else {
+      showStatus('Ping failed: Unknown error', true);
+    }
+  } catch (error) {
+    showStatus(`Error pinging device: ${(error as Error).message}`, true);
   }
 }
 
