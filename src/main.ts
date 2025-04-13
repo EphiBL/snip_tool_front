@@ -273,7 +273,15 @@ ipcMain.handle('ping-device', async (): Promise<{ success: boolean; message: str
 
 // Utility function to encode string to byte array
 function encodeString(str: string): number[] {
-  // Simple implementation - can be expanded based on requirements
+  // Before encoding, explicitly handle underscores to ensure they're correctly processed
+  // For debugging, log the byte values of underscores
+  if (str.includes('_')) {
+    console.log('String with underscore:', str);
+    const bytes = Array.from(Buffer.from(str, 'utf8'));
+    console.log('Encoded bytes:', bytes);
+    console.log('Underscore char code:', '_'.charCodeAt(0));
+    return bytes;
+  }
   return Array.from(Buffer.from(str, 'utf8'));
 }
 
@@ -284,14 +292,27 @@ function calculateChecksum(data: number[]): number {
 
 // Send data split into packets with proper format
 async function sendDataPackets(dataType: number, data: number[], device: HID.HID): Promise<void> {
-  // Maximum data size per packet
-  const maxDataSize = PACKET_SIZE - 4; // -4 for type, sequence, length, checksum
+  // The PACKET_SIZE is 32, but node-hid adds a report ID byte at index 0 
+  // so we need to only use 31 bytes of the 32 bytes for our data in the packet
+  const ACTUAL_PACKET_SIZE = PACKET_SIZE - 1; // Actual usable size minus the report ID byte
+  
+  // One byte for type, one for sequence, one for length
+  const HEADER_BYTES = 3;
+  // We need one byte for the checksum at the very end
+  const CHECKSUM_BYTES = 1;
+  
+  // Calculate how many bytes we can actually use for data in each packet
+  // 31 - 3 - 1 = 27 bytes for actual data
+  const MAX_DATA_BYTES = ACTUAL_PACKET_SIZE - HEADER_BYTES - CHECKSUM_BYTES;
+  
+  console.log(`Packet structure: ${ACTUAL_PACKET_SIZE} bytes total, ${HEADER_BYTES} header, ${MAX_DATA_BYTES} data, ${CHECKSUM_BYTES} checksum`);
   
   // Number of packets needed
-  const packetCount = Math.ceil(data.length / maxDataSize);
+  const packetCount = Math.ceil(data.length / MAX_DATA_BYTES);
+  let dataPosition = 0; // Track our position in the data array
   
   for (let i = 0; i < packetCount; i++) {
-    // Create a new packet
+    // Create a new packet with all zeros (index 0 is the report ID added by node-hid)
     const packet = new Array(PACKET_SIZE).fill(0);
     
     // Set data type (0x05 for trigger, 0x06 for snippet content, 0x07 for end-code)
@@ -308,25 +329,71 @@ async function sendDataPackets(dataType: number, data: number[], device: HID.HID
       packet[2] = SEQ.CONTINUE; // Continuation packet
     }
     
-    // Calculate the data slice for this packet
-    const startIndex = i * maxDataSize;
-    const endIndex = Math.min(startIndex + maxDataSize, data.length);
-    const packetData = data.slice(startIndex, endIndex);
+    // Calculate how much data we can fit in this packet
+    const bytesRemaining = data.length - dataPosition;
+    // Never copy more than MAX_DATA_BYTES into a single packet
+    const bytesToCopy = Math.min(MAX_DATA_BYTES, bytesRemaining);
     
     // Set the length of data in this packet
-    packet[3] = packetData.length;
+    packet[3] = bytesToCopy;
+    
+    // Data starts after the header (at index 4 because index 0 is report ID)
+    const dataStartIndex = 4;
+    
+    // Extract the data for this packet
+    const packetData = data.slice(dataPosition, dataPosition + bytesToCopy);
     
     // Copy the data into the packet
     for (let j = 0; j < packetData.length; j++) {
-      packet[4 + j] = packetData[j];
+      packet[dataStartIndex + j] = packetData[j];
     }
+    
+    // Update our position in the data array for the next packet
+    dataPosition += bytesToCopy;
     
     // Calculate checksum (type + sequence + length + all data)
     const checksumData = [packet[1], packet[2], packet[3], ...packetData];
+    // Put the checksum in the last byte of the packet
     packet[PACKET_SIZE - 1] = calculateChecksum(checksumData);
     
     // Send the packet
     console.log(`Sending packet: type=${packet[1].toString(16)}, seq=${packet[2].toString(16)}, len=${packet[3]}`);
+    
+    // Log the complete packet in hex format for debugging
+    const completeHexPacket = packet.map(b => b.toString(16).padStart(2, '0')).join(' ');
+    console.log(`Complete packet (hex): ${completeHexPacket}`);
+    
+    // Highlight key parts of the packet structure
+    console.log(`Header: ${completeHexPacket.substring(0, 11)}... | Data: ... | Checksum: ${completeHexPacket.substring(completeHexPacket.length - 5)}`);
+    
+    // Log data position information to verify our fix
+    console.log(`Data position: ${dataPosition} / ${data.length} (${Math.round((dataPosition / data.length) * 100)}%)`);
+    
+    // Log data in both hex and ASCII for better debugging
+    const packetDataHex = packetData.map(b => b.toString(16).padStart(2, '0')).join(' ');
+    const packetDataAscii = packetData.map(b => {
+      if (b >= 32 && b <= 126) { // Printable ASCII range
+        return String.fromCharCode(b);
+      }
+      return '.'; // Non-printable character
+    }).join('');
+    console.log(`Packet data (hex): ${packetDataHex}`);
+    console.log(`Packet data (ASCII): "${packetDataAscii}"`);
+    
+    // Show the next few bytes that will be sent in the next packet if any
+    if (dataPosition < data.length) {
+      const nextBytes = data.slice(dataPosition, Math.min(dataPosition + 10, data.length));
+      const nextBytesHex = nextBytes.map(b => b.toString(16).padStart(2, '0')).join(' ');
+      const nextBytesAscii = nextBytes.map(b => {
+        if (b >= 32 && b <= 126) { // Printable ASCII range
+          return String.fromCharCode(b);
+        }
+        return '.'; // Non-printable character
+      }).join('');
+      console.log(`Next packet will start with (hex): ${nextBytesHex}`);
+      console.log(`Next packet will start with (ASCII): "${nextBytesAscii}"`);
+    }
+    
     device.write(packet);
     
     // Short delay between packets to allow processing
