@@ -8,9 +8,14 @@ interface HidAPI {
   
   // Snippet operations
   readSnippets: () => Promise<any>;
-  addSnippet: (snippet: { trigger: string; text: string }) => Promise<any>;
+  addSnippet: (snippet: { trigger: string; text: string; endCode: string }) => Promise<any>;
   updateSnippet: (snippet: Snippet) => Promise<any>;
   deleteSnippet: (id: number) => Promise<any>;
+  
+  // New operations for local snippet management
+  flashSnippetsToKeyboard: () => Promise<any>;
+  exportSnippetsToC: (filePath: string) => Promise<any>;
+  selectExportDirectory: () => Promise<any>;
 }
 
 interface DeviceInfo {
@@ -30,6 +35,7 @@ interface Snippet {
   id: number;
   trigger: string;
   text: string;
+  endCode: string; // Hex code for QMK keycode
 }
 
 // Extend Window interface to include hidAPI and statusTimeout
@@ -46,21 +52,30 @@ const disconnectBtn = document.getElementById('disconnect-device') as HTMLButton
 const connectedDeviceEl = document.getElementById('connected-device') as HTMLDivElement;
 const deviceDetailsEl = document.getElementById('device-details') as HTMLDivElement;
 const snippetManagerEl = document.getElementById('snippet-manager') as HTMLDivElement;
-const readSnippetsBtn = document.getElementById('read-snippets') as HTMLButtonElement;
+const manageSnippetsBtn = document.getElementById('manage-snippets') as HTMLButtonElement;
 const addSnippetBtn = document.getElementById('add-snippet') as HTMLButtonElement;
+const exportSnippetsBtn = document.getElementById('export-snippets') as HTMLButtonElement;
+const backToHomeBtn = document.getElementById('back-to-home') as HTMLButtonElement;
 const snippetTableEl = (document.getElementById('snippet-table') as HTMLTableElement).querySelector('tbody') as HTMLTableSectionElement;
 const snippetEditorEl = document.getElementById('snippet-editor') as HTMLDivElement;
 const snippetIdEl = document.getElementById('snippet-id') as HTMLInputElement;
 const triggerEl = document.getElementById('trigger') as HTMLInputElement;
 const snippetTextEl = document.getElementById('snippet-text') as HTMLTextAreaElement;
+const endCodeEl = document.getElementById('end-code') as HTMLSelectElement;
 const saveSnippetBtn = document.getElementById('save-snippet') as HTMLButtonElement;
 const cancelEditBtn = document.getElementById('cancel-edit') as HTMLButtonElement;
+const triggerSearchEl = document.getElementById('trigger-search') as HTMLInputElement;
+const snippetSearchEl = document.getElementById('snippet-search') as HTMLInputElement;
+const clearSearchBtn = document.getElementById('clear-search') as HTMLButtonElement;
+const snippetCountEl = document.getElementById('snippet-count') as HTMLParagraphElement;
+const storageUsageEl = document.getElementById('storage-usage') as HTMLParagraphElement;
 const statusEl = document.getElementById('status') as HTMLDivElement;
 const pingDeviceBtn = document.createElement('button') as HTMLButtonElement;
 
 // Store current device and snippets
 let currentDevice: DeviceInfo | null = null;
 let snippets: Snippet[] = [];
+let filteredSnippets: Snippet[] = [];
 
 // Helper functions
 function showStatus(message: string, isError = false): void {
@@ -313,23 +328,94 @@ async function readSnippetsFromDevice(): Promise<void> {
   }
 }
 
+// Apply search filters and update filtered snippets
+function applySearchFilters(): void {
+  const triggerQuery = triggerSearchEl.value.toLowerCase();
+  const snippetQuery = snippetSearchEl.value.toLowerCase();
+  
+  // If both search fields are empty, use all snippets
+  if (!triggerQuery && !snippetQuery) {
+    filteredSnippets = [...snippets];
+  } else {
+    // Filter based on search criteria
+    filteredSnippets = snippets.filter(snippet => {
+      const triggerMatch = !triggerQuery || snippet.trigger.toLowerCase().includes(triggerQuery);
+      const snippetMatch = !snippetQuery || snippet.text.toLowerCase().includes(snippetQuery);
+      return triggerMatch && snippetMatch;
+    });
+  }
+  
+  // Re-render the table with the filtered snippets
+  renderSnippetTable();
+}
+
+// Clear search filters
+function clearSearchFilters(): void {
+  triggerSearchEl.value = '';
+  snippetSearchEl.value = '';
+  filteredSnippets = [...snippets];
+  renderSnippetTable();
+}
+
 function renderSnippetTable(): void {
   // Clear the table
   snippetTableEl.innerHTML = '';
   
-  if (snippets.length === 0) {
+  // Get the snippets to display (either all or filtered)
+  const displaySnippets = filteredSnippets.length > 0 || 
+    (triggerSearchEl.value || snippetSearchEl.value) ? filteredSnippets : snippets;
+  
+  if (displaySnippets.length === 0) {
     const row = document.createElement('tr');
-    row.innerHTML = `<td colspan="3">No snippets found</td>`;
+    row.innerHTML = `<td colspan="4">No snippets found</td>`;
     snippetTableEl.appendChild(row);
+    
+    // Update stats
+    if (triggerSearchEl.value || snippetSearchEl.value) {
+      snippetCountEl.textContent = `No matches (${snippets.length} total)`;
+    } else {
+      snippetCountEl.textContent = 'No snippets';
+    }
+    
+    storageUsageEl.textContent = '0/0 bytes used';
     return;
   }
   
   // Add each snippet to the table
-  snippets.forEach(snippet => {
+  displaySnippets.forEach(snippet => {
     const row = document.createElement('tr');
+    
+    // Escape HTML in text to prevent XSS
+    const escapedTrigger = escapeHtml(snippet.trigger);
+    const escapedText = escapeHtml(snippet.text);
+    
+    // Get human-readable end code name
+    console.log(`Snippet ${snippet.id} has end code: "${snippet.endCode}"`);
+    const endCodeName = getEndCodeName(snippet.endCode || '0x0000');
+    
+    // Check for leading and trailing whitespace
+    const hasLeadingWS = snippet.text.length > 0 && /^\s/.test(snippet.text);
+    const hasTrailingWS = snippet.text.length > 0 && /\s$/.test(snippet.text);
+    
+    // Create tooltip text explaining whitespace
+    let tooltipText = '';
+    if (hasLeadingWS || hasTrailingWS) {
+      tooltipText = 'Contains ';
+      if (hasLeadingWS) tooltipText += 'leading';
+      if (hasLeadingWS && hasTrailingWS) tooltipText += ' and ';
+      if (hasTrailingWS) tooltipText += 'trailing';
+      tooltipText += ' whitespace';
+    }
+    
+    // Build whitespace classes
+    let wsClasses = 'snippet-text';
+    if (hasLeadingWS) wsClasses += ' has-leading-ws';
+    if (hasTrailingWS) wsClasses += ' has-trailing-ws';
+    
     row.innerHTML = `
-      <td>${snippet.trigger}</td>
-      <td>${snippet.text}</td>
+      <td>${escapedTrigger}</td>
+      <td><span class="${wsClasses}" ${tooltipText ? `title="${tooltipText}"` : ''}>${escapedText}</span></td>
+      <td>${endCodeName}</td>
       <td>
         <button class="edit-btn" data-id="${snippet.id}">Edit</button>
         <button class="delete-btn" data-id="${snippet.id}">Delete</button>
@@ -344,6 +430,59 @@ function renderSnippetTable(): void {
     editBtn.addEventListener('click', () => editSnippet(snippet.id));
     deleteBtn.addEventListener('click', () => deleteSnippet(snippet.id));
   });
+  
+  // Update stats
+  updateSnippetStats(displaySnippets);
+}
+
+// Helper function to escape HTML
+function escapeHtml(str: string): string {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+// Helper function to get human-readable end code name
+function getEndCodeName(hexCode: string): string {
+  const endCodeMap: Record<string, string> = {
+    '0x0000': '-',
+    '0x0050': 'Left',
+    '0x004F': 'Right',
+    '0x0052': 'Up',
+    '0x0051': 'Down',
+    '0x0028': 'Enter',
+    '0x002B': 'Tab',
+    '0x004A': 'Home',
+    '0x004D': 'End'
+  };
+  
+  return endCodeMap[hexCode] || hexCode;
+}
+
+// Update snippet statistics
+function updateSnippetStats(displaySnippets: Snippet[] = snippets): void {
+  const isFiltered = displaySnippets !== snippets && displaySnippets.length !== snippets.length;
+  
+  if (isFiltered) {
+    snippetCountEl.textContent = `${displaySnippets.length} of ${snippets.length} snippet${snippets.length !== 1 ? 's' : ''}`;
+  } else {
+    snippetCountEl.textContent = `${snippets.length} snippet${snippets.length !== 1 ? 's' : ''}`;
+  }
+  
+  // Calculate storage usage (approximate)
+  let totalBytes = 0;
+  snippets.forEach(snippet => {
+    // Each trigger char is 1 byte + null terminator
+    const triggerBytes = snippet.trigger.length + 1;
+    // Each text char is 1 byte + null terminator
+    const textBytes = snippet.text.length + 1;
+    // Total bytes for this snippet (including struct overhead)
+    totalBytes += triggerBytes + textBytes;
+  });
+  
+  // EEPROM size (user space) is typically around 1KB on many QMK boards
+  const totalEEPROM = 2048;
+  storageUsageEl.textContent = `${totalBytes}/${totalEEPROM} bytes used (${Math.round(totalBytes/totalEEPROM*100)}%)`;
 }
 
 function showSnippetEditor(snippet: Snippet | null = null): void {
@@ -352,19 +491,36 @@ function showSnippetEditor(snippet: Snippet | null = null): void {
     snippetIdEl.value = snippet.id.toString();
     triggerEl.value = snippet.trigger;
     snippetTextEl.value = snippet.text;
+    endCodeEl.value = snippet.endCode || '0x0000';
   } else {
     // Clear form for new snippet
     snippetIdEl.value = '';
     triggerEl.value = '';
     snippetTextEl.value = '';
+    endCodeEl.value = '0x0000'; // Default to None
   }
   
-  // Show editor
+  // Show editor with fade-in effect
+  snippetEditorEl.style.opacity = '0';
   snippetEditorEl.style.display = 'block';
+  
+  // Force reflow then fade in
+  void snippetEditorEl.offsetWidth;
+  snippetEditorEl.style.opacity = '1';
+  
+  // Focus the trigger input
+  setTimeout(() => triggerEl.focus(), 100);
 }
 
 function hideSnippetEditor(): void {
-  snippetEditorEl.style.display = 'none';
+  // Fade out before hiding
+  snippetEditorEl.style.opacity = '0';
+  
+  setTimeout(() => {
+    snippetEditorEl.style.display = 'none';
+    // Reset opacity for next time
+    snippetEditorEl.style.opacity = '1';
+  }, 300);
 }
 
 function editSnippet(id: number): void {
@@ -377,8 +533,11 @@ function editSnippet(id: number): void {
 async function saveSnippet(): Promise<void> {
   try {
     const id = snippetIdEl.value ? parseInt(snippetIdEl.value) : null;
-    const trigger = triggerEl.value.trim();
-    const text = snippetTextEl.value.trim();
+    const trigger = triggerEl.value.trim(); // Trim trigger as it's typically a keyword
+    const text = snippetTextEl.value; // Preserve all whitespace in the snippet text
+    const endCode = endCodeEl.value || '0x0000'; // Get selected end code or default to 0x0000
+    
+    console.log(`Saving snippet with end code: "${endCode}"`); // Debug log
     
     if (!trigger || !text) {
       showStatus('Trigger and snippet text are required', true);
@@ -391,7 +550,7 @@ async function saveSnippet(): Promise<void> {
     let result;
     if (isNewSnippet) {
       // Add new snippet
-      result = await window.hidAPI.addSnippet({ trigger, text });
+      result = await window.hidAPI.addSnippet({ trigger, text, endCode });
       
       if ('error' in result) {
         showStatus(`Failed to add snippet: ${result.error}`, true);
@@ -400,7 +559,7 @@ async function saveSnippet(): Promise<void> {
       
       if ('success' in result && result.success && 'id' in result) {
         // Add to local data with the returned ID
-        snippets.push({ id: result.id, trigger, text });
+        snippets.push({ id: result.id, trigger, text, endCode });
         showStatus('Snippet added successfully');
       } else {
         showStatus('Failed to add snippet: Unknown error', true);
@@ -408,7 +567,7 @@ async function saveSnippet(): Promise<void> {
       }
     } else {
       // Update existing snippet
-      const snippetToUpdate = { id: id as number, trigger, text };
+      const snippetToUpdate = { id: id as number, trigger, text, endCode };
       result = await window.hidAPI.updateSnippet(snippetToUpdate);
       
       if ('error' in result) {
@@ -488,14 +647,219 @@ async function pingConnectedDevice(): Promise<void> {
   }
 }
 
+// Show snippet manager from home page
+function showSnippetManager(): void {
+  // Hide device selection with smooth transition
+  const deviceSelection = document.getElementById('device-selection') as HTMLDivElement;
+  deviceSelection.style.opacity = '0';
+  
+  setTimeout(() => {
+    deviceSelection.style.display = 'none';
+    
+    // Show snippet manager
+    snippetManagerEl.style.display = 'block';
+    
+    // Force reflow then fade in
+    void snippetManagerEl.offsetWidth;
+    snippetManagerEl.style.opacity = '1';
+    
+    // Load snippets
+    loadSnippets();
+  }, 300);
+}
+
+// Return to home page from snippet manager
+function returnToHome(): void {
+  // Hide snippet manager with smooth transition
+  snippetManagerEl.style.opacity = '0';
+  
+  setTimeout(() => {
+    snippetManagerEl.style.display = 'none';
+    
+    // Show device selection
+    const deviceSelection = document.getElementById('device-selection') as HTMLDivElement;
+    deviceSelection.style.display = 'block';
+    
+    // Force reflow then fade in
+    void deviceSelection.offsetWidth;
+    deviceSelection.style.opacity = '1';
+  }, 300);
+}
+
+// Load snippets from local storage
+async function loadSnippets(): Promise<void> {
+  try {
+    showStatus('Loading snippets...');
+    
+    const result = await window.hidAPI.readSnippets();
+    
+    if ('error' in result) {
+      showStatus(`Failed to load snippets: ${result.error}`, true);
+      return;
+    }
+    
+    if ('snippets' in result) {
+      snippets = result.snippets;
+      
+      // Ensure all snippets have an endCode property
+      snippets = snippets.map(snippet => {
+        if (!snippet.endCode) {
+          console.log(`Adding missing endCode to snippet ${snippet.id}`);
+          return { ...snippet, endCode: '0x0000' };
+        }
+        return snippet;
+      });
+      
+      filteredSnippets = [...snippets]; // Initialize filtered snippets
+      renderSnippetTable();
+      showStatus(`${snippets.length} snippet${snippets.length !== 1 ? 's' : ''} loaded successfully`);
+    } else {
+      showStatus('No snippet data received', true);
+    }
+  } catch (error) {
+    showStatus(`Error loading snippets: ${(error as Error).message}`, true);
+  }
+}
+
+// Flash snippets to keyboard
+async function flashSnippetsToKeyboard(): Promise<void> {
+  try {
+    if (snippets.length === 0) {
+      showStatus('No snippets to flash to keyboard', true);
+      return;
+    }
+    
+    showStatus('Flashing snippets to keyboard...');
+    
+    const result = await window.hidAPI.flashSnippetsToKeyboard();
+    
+    if ('error' in result) {
+      showStatus(`Failed to flash snippets: ${result.error}`, true);
+      return;
+    }
+    
+    if ('success' in result && result.success) {
+      showStatus('Snippets flashed to keyboard successfully!');
+    } else {
+      showStatus('Failed to flash snippets: Unknown error', true);
+    }
+  } catch (error) {
+    showStatus(`Error flashing snippets: ${(error as Error).message}`, true);
+  }
+}
+
+// Export snippets to C file
+async function exportSnippetsToC(): Promise<void> {
+  try {
+    if (snippets.length === 0) {
+      showStatus('No snippets to export', true);
+      return;
+    }
+    
+    // Show file dialog
+    showStatus('Selecting export location...');
+    
+    const result = await window.hidAPI.selectExportDirectory();
+    
+    if ('error' in result) {
+      showStatus(`Export failed: ${result.error}`, true);
+      return;
+    }
+    
+    if ('canceled' in result && result.canceled) {
+      showStatus('Export canceled');
+      return;
+    }
+    
+    if (!result.filePath) {
+      showStatus('No file path selected', true);
+      return;
+    }
+    
+    // Export to selected path
+    showStatus(`Exporting snippets to ${result.filePath}...`);
+    
+    const exportResult = await window.hidAPI.exportSnippetsToC(result.filePath);
+    
+    if ('error' in exportResult) {
+      showStatus(`Failed to export snippets: ${exportResult.error}`, true);
+      return;
+    }
+    
+    if ('success' in exportResult && exportResult.success) {
+      showStatus(`Snippets exported successfully to ${result.filePath}!`);
+    } else {
+      showStatus('Failed to export snippets: Unknown error', true);
+    }
+  } catch (error) {
+    showStatus(`Error exporting snippets: ${(error as Error).message}`, true);
+  }
+}
+
 // Event Listeners
 refreshBtn.addEventListener('click', refreshDeviceList);
 connectBtn.addEventListener('click', connectToDevice);
 disconnectBtn.addEventListener('click', disconnectFromDevice);
-readSnippetsBtn.addEventListener('click', readSnippetsFromDevice);
+manageSnippetsBtn.addEventListener('click', showSnippetManager);
 addSnippetBtn.addEventListener('click', () => showSnippetEditor());
 saveSnippetBtn.addEventListener('click', saveSnippet);
 cancelEditBtn.addEventListener('click', hideSnippetEditor);
+exportSnippetsBtn.addEventListener('click', exportSnippetsToC);
+backToHomeBtn.addEventListener('click', returnToHome);
+
+// Search functionality
+triggerSearchEl.addEventListener('input', applySearchFilters);
+snippetSearchEl.addEventListener('input', applySearchFilters);
+clearSearchBtn.addEventListener('click', clearSearchFilters);
+
+// Handle keyboard shortcuts
+function setupKeyboardShortcuts(): void {
+  document.addEventListener('keydown', (event) => {
+    // Get active element to check if we're in an input or textarea
+    const activeElement = document.activeElement;
+    const isInInput = activeElement && (activeElement.tagName === 'INPUT' || activeElement.tagName === 'TEXTAREA');
+    
+    // Get the key pressed (case insensitive)
+    const key = event.key.toLowerCase();
+    
+    // M key for Manage Snippets (only when not in an input)
+    if (key === 'm' && !isInInput) {
+      // Only if the button is visible
+      if (manageSnippetsBtn.offsetParent !== null) {
+        manageSnippetsBtn.click();
+        event.preventDefault();
+      }
+    }
+    
+    // C key for Add New Snippet (only when not in an input)
+    if (key === 'c' && !isInInput) {
+      // Only if the button is visible
+      if (addSnippetBtn.offsetParent !== null) {
+        addSnippetBtn.click();
+        // Focus the trigger box
+        setTimeout(() => triggerEl.focus(), 100);
+        event.preventDefault();
+      }
+    }
+    
+    // Handle Enter in the snippet text area
+    if (activeElement && activeElement === snippetTextEl) {
+      if (event.key === 'Enter') {
+        if (event.shiftKey) {
+          // Shift+Enter adds a newline (default behavior)
+          return;
+        } else {
+          // Regular Enter saves the snippet
+          saveSnippetBtn.click();
+          event.preventDefault();
+        }
+      }
+    }
+  });
+}
 
 // Initialize the device list when the page loads
-document.addEventListener('DOMContentLoaded', refreshDeviceList);
+document.addEventListener('DOMContentLoaded', () => {
+  refreshDeviceList();
+  setupKeyboardShortcuts();
+});

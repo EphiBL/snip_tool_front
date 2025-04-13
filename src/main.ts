@@ -1,8 +1,12 @@
 import { app, BrowserWindow, ipcMain } from 'electron';
 import * as path from 'path';
 import * as HID from 'node-hid';
+import * as fs from 'fs';
+import * as electron from 'electron';
 
 let mainWindow: BrowserWindow | null;
+// Store snippets.json in the project directory
+const snippetsFilePath = path.join(__dirname, '../snippets.json');
 
 interface DeviceInfo {
   vendorId: number;
@@ -21,6 +25,7 @@ interface Snippet {
   id: number;
   trigger: string;
   text: string;
+  endCode: string; // Hex code for QMK keycode
 }
 
 interface ConnectedDevice {
@@ -30,6 +35,53 @@ interface ConnectedDevice {
 
 // Create a global variable for the connected device
 let connectedDevice: ConnectedDevice | null = null;
+
+// Local storage for snippets
+let localSnippets: Snippet[] = [];
+let nextSnippetId = 1;
+
+// Load snippets from local storage
+function loadSnippetsFromDisk(): void {
+  try {
+    if (fs.existsSync(snippetsFilePath)) {
+      const data = fs.readFileSync(snippetsFilePath, 'utf8');
+      const parsed = JSON.parse(data);
+      localSnippets = parsed.snippets || [];
+      
+      // Ensure all snippets have an endCode property
+      localSnippets = localSnippets.map(snippet => {
+        if (!snippet.endCode) {
+          console.log(`Adding missing endCode to snippet ${snippet.id}`);
+          return { ...snippet, endCode: '0x0000' };
+        }
+        return snippet;
+      });
+      
+      nextSnippetId = localSnippets.length > 0 
+        ? Math.max(0, ...localSnippets.map(s => s.id)) + 1 
+        : 1;
+      console.log(`Loaded ${localSnippets.length} snippets from ${snippetsFilePath}`);
+    } else {
+      console.log(`No snippets file found at ${snippetsFilePath}, starting with empty collection`);
+      localSnippets = [];
+      nextSnippetId = 1;
+    }
+  } catch (error) {
+    console.error(`Error loading snippets from ${snippetsFilePath}:`, error);
+    localSnippets = [];
+    nextSnippetId = 1;
+  }
+}
+
+// Save snippets to local storage
+function saveSnippetsToDisk(): void {
+  try {
+    fs.writeFileSync(snippetsFilePath, JSON.stringify({ snippets: localSnippets }, null, 2), 'utf8');
+    console.log(`Saved ${localSnippets.length} snippets to ${snippetsFilePath}`);
+  } catch (error) {
+    console.error('Error saving snippets to disk:', error);
+  }
+}
 
 function createWindow(): void {
   mainWindow = new BrowserWindow({
@@ -50,6 +102,8 @@ function createWindow(): void {
 }
 
 app.whenReady().then(() => {
+  // Load snippets before creating the window
+  loadSnippetsFromDisk();
   createWindow();
 
   app.on('activate', () => {
@@ -229,171 +283,217 @@ function parseSnippetsFromResponse(response: number[] | Buffer): Snippet[] {
   return [];
 }
 
-// Read snippets from keyboard
-// Example code from claude non-final
+// Get all snippets from local storage
 ipcMain.handle('read-snippets', async (): Promise<{ snippets: Snippet[] } | { error: string }> => {
   try {
-    if (!connectedDevice || !connectedDevice.device) {
-      return { error: 'No device connected' };
-    }
-    
-    // Send command to read snippets
-    // Example: [command_id]
-    connectedDevice.device.write([QMK_CMD.READ_SNIPPETS]);
-    
-    try {
-      // Read response - this will be specific to your keyboard's protocol
-      const response = connectedDevice.device.readTimeout(2000); // 2 second timeout
-      
-      // Parse the response into snippets
-      // This is just an example - actual parsing would depend on your keyboard's protocol
-      const snippets: Snippet[] = parseSnippetsFromResponse(response);
-      
-      return { snippets };
-    } catch (readError) {
-      console.warn('No response from device or timeout:', readError);
-      return { error: 'No response from device or timeout' };
-    }
+    return { snippets: localSnippets };
   } catch (error) {
     console.error('Error reading snippets:', error);
     return { error: (error as Error).message };
   }
 });
 
-// Add a new snippet to keyboard
-// Example code from claude non-final
-ipcMain.handle('add-snippet', async (_, snippet: { trigger: string; text: string }): Promise<{ success: boolean; id?: number } | { error: string }> => {
+// Add a new snippet to local storage
+ipcMain.handle('add-snippet', async (_, snippet: { trigger: string; text: string; endCode: string }): Promise<{ success: boolean; id?: number } | { error: string }> => {
   try {
-    if (!connectedDevice || !connectedDevice.device) {
-      return { error: 'No device connected' };
+    const { trigger, text, endCode } = snippet;
+    
+    // Validate input
+    if (!trigger || !text) {
+      return { error: 'Trigger and text are required' };
     }
     
-    const { trigger, text } = snippet;
-    
-    // Convert strings to byte arrays
-    const triggerBytes = encodeString(trigger);
-    const textBytes = encodeString(text);
-    
-    // Create command: [command_id, trigger_length, ...trigger_bytes, text_length, ...text_bytes]
-    const command = [
-      QMK_CMD.ADD_SNIPPET,
-      triggerBytes.length,
-      ...triggerBytes,
-      textBytes.length,
-      ...textBytes
-    ];
-    
-    // Send command
-    connectedDevice.device.write(command);
-    
-    try {
-      // Read response - expecting snippet ID in the response
-      const response = connectedDevice.device.readTimeout(1000); // 1 second timeout
-      
-      // Parse response - assuming first byte is success/fail code, and next 2 bytes are the snippet ID (if success)
-      if (response && response.length >= 3 && response[0] === 0x01) {
-        // Success - extract ID (16-bit value from bytes 1-2)
-        const id = (response[1] << 8) | response[2];
-        return { success: true, id };
-      } else {
-        return { error: 'Failed to add snippet' };
-      }
-    } catch (readError) {
-      console.warn('No response from device or timeout:', readError);
-      return { error: 'No response from device or timeout' };
+    if (trigger.length > 7) {
+      return { error: 'Trigger must be 7 characters or less' };
     }
+    
+    if (text.length > 100) {
+      return { error: 'Snippet text must be 100 characters or less' };
+    }
+    
+    // Check if trigger already exists
+    if (localSnippets.some(s => s.trigger === trigger)) {
+      return { error: 'A snippet with this trigger already exists' };
+    }
+    
+    // Create new snippet
+    const newSnippet: Snippet = {
+      id: nextSnippetId++,
+      trigger,
+      text,
+      endCode: endCode || '0x0000' // Default to 0x0000 for no end code
+    };
+    
+    // Add to collection
+    localSnippets.push(newSnippet);
+    
+    // Save to disk
+    saveSnippetsToDisk();
+    
+    return { success: true, id: newSnippet.id };
   } catch (error) {
     console.error('Error adding snippet:', error);
     return { error: (error as Error).message };
   }
 });
 
-// Update an existing snippet
-// Example code from claude non-final
+// Update an existing snippet in local storage
 ipcMain.handle('update-snippet', async (_, snippet: Snippet): Promise<{ success: boolean } | { error: string }> => {
   try {
-    if (!connectedDevice || !connectedDevice.device) {
-      return { error: 'No device connected' };
-    }
-    
     const { id, trigger, text } = snippet;
     
-    // Convert strings to byte arrays
-    const triggerBytes = encodeString(trigger);
-    const textBytes = encodeString(text);
-    
-    // Create ID bytes (16-bit value split into 2 bytes)
-    const idBytes = [(id >> 8) & 0xFF, id & 0xFF];
-    
-    // Create command: [command_id, ...id_bytes, trigger_length, ...trigger_bytes, text_length, ...text_bytes]
-    const command = [
-      QMK_CMD.UPDATE_SNIPPET,
-      ...idBytes,
-      triggerBytes.length,
-      ...triggerBytes,
-      textBytes.length,
-      ...textBytes
-    ];
-    
-    // Send command
-    connectedDevice.device.write(command);
-    
-    try {
-      // Read response
-      const response = connectedDevice.device.readTimeout(1000); // 1 second timeout
-      
-      // Check if successful
-      if (response && response.length >= 1 && response[0] === 0x01) {
-        return { success: true };
-      } else {
-        return { error: 'Failed to update snippet' };
-      }
-    } catch (readError) {
-      console.warn('No response from device or timeout:', readError);
-      return { error: 'No response from device or timeout' };
+    // Validate input
+    if (!trigger || !text) {
+      return { error: 'Trigger and text are required' };
     }
+    
+    if (trigger.length > 7) {
+      return { error: 'Trigger must be 7 characters or less' };
+    }
+    
+    if (text.length > 100) {
+      return { error: 'Snippet text must be 100 characters or less' };
+    }
+    
+    // Find snippet index
+    const index = localSnippets.findIndex(s => s.id === id);
+    if (index === -1) {
+      return { error: 'Snippet not found' };
+    }
+    
+    // Check if trigger already exists (but not for this snippet)
+    if (localSnippets.some(s => s.trigger === trigger && s.id !== id)) {
+      return { error: 'A snippet with this trigger already exists' };
+    }
+    
+    // Update snippet
+    localSnippets[index] = { ...snippet };
+    
+    // Save to disk
+    saveSnippetsToDisk();
+    
+    return { success: true };
   } catch (error) {
     console.error('Error updating snippet:', error);
     return { error: (error as Error).message };
   }
 });
 
-// Delete a snippet
-// Example code from claude non-final
+// Delete a snippet from local storage
 ipcMain.handle('delete-snippet', async (_, id: number): Promise<{ success: boolean } | { error: string }> => {
+  try {
+    // Find snippet index
+    const index = localSnippets.findIndex(s => s.id === id);
+    if (index === -1) {
+      return { error: 'Snippet not found' };
+    }
+    
+    // Remove snippet
+    localSnippets.splice(index, 1);
+    
+    // Save to disk
+    saveSnippetsToDisk();
+    
+    return { success: true };
+  } catch (error) {
+    console.error('Error deleting snippet:', error);
+    return { error: (error as Error).message };
+  }
+});
+
+// Send snippets to the keyboard
+ipcMain.handle('flash-snippets-to-keyboard', async (): Promise<{ success: boolean } | { error: string }> => {
   try {
     if (!connectedDevice || !connectedDevice.device) {
       return { error: 'No device connected' };
     }
     
-    // Create ID bytes (16-bit value split into 2 bytes)
-    const idBytes = [(id >> 8) & 0xFF, id & 0xFF];
-    
-    // Create command: [command_id, ...id_bytes]
-    const command = [
-      QMK_CMD.DELETE_SNIPPET,
-      ...idBytes
-    ];
-    
-    // Send command
-    connectedDevice.device.write(command);
-    
-    try {
-      // Read response
-      const response = connectedDevice.device.readTimeout(1000); // 1 second timeout
-      
-      // Check if successful
-      if (response && response.length >= 1 && response[0] === 0x01) {
-        return { success: true };
-      } else {
-        return { error: 'Failed to delete snippet' };
-      }
-    } catch (readError) {
-      console.warn('No response from device or timeout:', readError);
-      return { error: 'No response from device or timeout' };
+    if (localSnippets.length === 0) {
+      return { error: 'No snippets to flash' };
     }
+    
+    // Here you would implement the logic to send all snippets to the keyboard
+    // This is a placeholder for the actual implementation
+    console.log('Would flash snippets to keyboard:', localSnippets);
+    
+    return { success: true };
   } catch (error) {
-    console.error('Error deleting snippet:', error);
+    console.error('Error flashing snippets to keyboard:', error);
+    return { error: (error as Error).message };
+  }
+});
+
+// Export snippets to C file for direct firmware inclusion
+//  WARNING: DO NOT USE, NOT SET UP
+ipcMain.handle('export-snippets-to-c', async (_, filePath: string): Promise<{ success: boolean } | { error: string }> => {
+  try {
+    if (localSnippets.length === 0) {
+      return { error: 'No snippets to export' };
+    }
+    
+    const timestamp = new Date().toISOString();
+    const cFileContent = `/* 
+ * Exported QMK Snippets
+ * Generated on: ${timestamp}
+ * Number of snippets: ${localSnippets.length}
+ */
+
+#include "quantum.h"
+#include "raw_hid.h"
+
+// Snippet structure definition
+typedef struct {
+    char trigger[8];    // Max 7 chars + null terminator
+    char text[101];     // Max 100 chars + null terminator
+    uint16_t end_code;  // QMK keycode to send after the snippet
+} qmk_snippet_t;
+
+// Exported snippets array
+const qmk_snippet_t QMK_SNIPPETS[] = {
+${localSnippets.map(s => {
+  // Escape special characters in the strings
+  const escapedTrigger = s.trigger.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  const escapedText = s.text.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  // Default to 0x0000 if end code not present
+  const endCode = s.endCode || '0x0000';
+  return `    {"${escapedTrigger}", "${escapedText}", ${endCode}}`;
+}).join(',\n')}
+};
+
+// Number of snippets
+const uint8_t QMK_SNIPPET_COUNT = ${localSnippets.length};
+`;
+    
+    fs.writeFileSync(filePath, cFileContent, 'utf8');
+    
+    return { success: true };
+  } catch (error) {
+    console.error('Error exporting snippets to C file:', error);
+    return { error: (error as Error).message };
+  }
+});
+
+// Allow selecting export directory using system dialog
+ipcMain.handle('select-export-directory', async (): Promise<{ filePath?: string; canceled?: boolean } | { error: string }> => {
+  try {
+    if (!mainWindow) {
+      return { error: 'Main window not available' };
+    }
+    
+    const result = await electron.dialog.showSaveDialog(mainWindow, {
+      title: 'Export Snippets to C File',
+      defaultPath: path.join(app.getPath('documents'), 'qmk_snippets.c'),
+      filters: [
+        { name: 'C Source Files', extensions: ['c'] }
+      ]
+    });
+    
+    return {
+      filePath: result.filePath,
+      canceled: result.canceled
+    };
+  } catch (error) {
+    console.error('Error selecting export directory:', error);
     return { error: (error as Error).message };
   }
 });

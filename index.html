@@ -195,7 +195,7 @@
     }
 
     th, td {
-      padding: 12px 16px;
+      padding: 4px 12px;
       text-align: left;
       border: none;
     }
@@ -225,6 +225,12 @@
     tr:hover {
       background-color: rgba(255, 95, 135, 0.1);
     }
+    
+    /* Reduce row height */
+    tr td {
+      height: 28px;
+      vertical-align: middle;
+    }
 
     .snippet-editor {
       margin: 20px 0;
@@ -233,6 +239,8 @@
       background-color: var(--card-header);
       border-radius: 4px;
       border: 1px solid var(--divider-color);
+      transition: opacity 0.3s ease;
+      opacity: 1;
     }
 
     label {
@@ -272,11 +280,19 @@
       border-left: 3px solid var(--error-color);
     }
 
-    .edit-btn {
+    .edit-btn, .delete-btn {
       background-color: var(--card-header);
+      min-width: 60px;
+      padding: 4px 8px;
+      margin: 2px;
+      font-size: 12px;
+      height: 26px;
+      line-height: 1;
+    }
+    
+    .edit-btn {
       color: var(--secondary-color);
       border: 1px solid var(--secondary-color);
-      min-width: 80px;
     }
 
     .edit-btn:hover {
@@ -285,15 +301,168 @@
     }
 
     .delete-btn {
-      background-color: var(--card-header);
       color: var(--danger-color);
       border: 1px solid var(--danger-color);
-      min-width: 80px;
     }
 
     .delete-btn:hover {
       background-color: var(--danger-color);
       color: #000000;
+    }
+    
+    .primary-btn {
+      background-color: var(--card-header);
+      color: var(--primary-color);
+      border: 1px solid var(--primary-color);
+      font-weight: bold;
+    }
+    
+    .primary-btn:hover {
+      background-color: var(--primary-color);
+      color: #000000;
+    }
+    
+    .secondary-btn {
+      background-color: var(--card-header);
+      color: var(--secondary-color);
+      border: 1px solid var(--secondary-color);
+    }
+    
+    .secondary-btn:hover {
+      background-color: var(--secondary-color);
+      color: #000000;
+    }
+    
+    .snippet-stats {
+      margin: 15px 0;
+      padding: 10px 15px;
+      background-color: var(--card-header);
+      border: 1px solid var(--divider-color);
+      border-radius: 4px;
+      font-size: 14px;
+      display: flex;
+      justify-content: space-between;
+    }
+    
+    .snippet-stats p {
+      margin: 0;
+      color: var(--text-secondary);
+    }
+    
+    .shortcut {
+      display: inline-block;
+      font-size: 0.8em;
+      opacity: 0.8;
+      margin-left: 5px;
+      font-weight: normal;
+    }
+    
+    .input-help {
+      display: block;
+      color: var(--text-secondary);
+      font-size: 0.8em;
+      margin-top: 4px;
+      font-style: italic;
+    }
+    
+    .search-container {
+      display: flex;
+      gap: 10px;
+      margin: 15px 0;
+    }
+    
+    .search-box {
+      flex: 1;
+    }
+    
+    .search-box input {
+      margin: 0;
+      font-size: 13px;
+      height: 34px;
+      background-color: var(--card-bg);
+      border-color: var(--divider-color);
+    }
+    
+    .search-box input:focus {
+      border-color: var(--primary-color);
+    }
+    
+    .search-actions {
+      flex: 0 0 auto;
+      display: flex;
+      align-items: center;
+    }
+    
+    .small-btn {
+      height: 34px;
+      min-width: 80px;
+      padding: 0 12px;
+      margin: 0;
+      font-size: 13px;
+    }
+    
+    /* Make snippet content in table show ellipsis when too long */
+    td:nth-child(1) {
+      width: 15%; /* Trigger column */
+    }
+    
+    td:nth-child(2) {
+      width: 55%; /* Snippet text column */
+      max-width: 400px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      font-family: 'Cascadia Code', 'Fira Code', monospace;
+    }
+    
+    /* Whitespace indicators */
+    .snippet-text {
+      position: relative;
+      display: inline-block;
+      padding: 2px 4px;
+      border-radius: 2px;
+      vertical-align: middle;
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    
+    .snippet-text.has-leading-ws {
+      border-left: 2px solid var(--primary-color);
+      padding-left: 6px;
+    }
+    
+    .snippet-text.has-trailing-ws {
+      border-right: 2px solid var(--primary-color);
+      padding-right: 6px;
+    }
+    
+    /* Display quote marks for snippets with whitespace */
+    .snippet-text.has-leading-ws::before,
+    .snippet-text.has-trailing-ws::after {
+      color: var(--primary-color);
+      opacity: 0.8;
+      font-weight: bold;
+    }
+    
+    .snippet-text.has-leading-ws::before {
+      content: """;
+      margin-right: 2px;
+    }
+    
+    .snippet-text.has-trailing-ws::after {
+      content: """;
+      margin-left: 2px;
+    }
+    
+    td:nth-child(3) {
+      width: 10%; /* End code column */
+      text-align: center;
+    }
+    
+    td:nth-child(4) {
+      width: 20%; /* Actions column */
+      text-align: center;
     }
 
     #device-details {
@@ -338,6 +507,7 @@
       <div class="content-section">
         <div class="action-row">
           <button id="refresh-devices">Refresh Devices</button>
+          <button id="manage-snippets">Manage Snippets <span class="shortcut">[M]</span></button>
         </div>
         
         <select id="device-list" size="5"></select>
@@ -362,8 +532,26 @@
       
       <div class="content-section">
         <div class="action-row">
-          <button id="read-snippets">Read Snippets</button>
-          <button id="add-snippet">Add New Snippet</button>
+          <button id="add-snippet">Add New Snippet <span class="shortcut">[C]</span></button>
+          <button id="export-snippets" class="secondary-btn">Export to QMK C File</button>
+          <button id="back-to-home">Back to Home</button>
+        </div>
+        
+        <div class="snippet-stats">
+          <p id="snippet-count">No snippets</p>
+          <p id="storage-usage">0/0 bytes used</p>
+        </div>
+
+        <div class="search-container">
+          <div class="search-box">
+            <input type="text" id="trigger-search" placeholder="Search triggers...">
+          </div>
+          <div class="search-box">
+            <input type="text" id="snippet-search" placeholder="Search snippet contents...">
+          </div>
+          <div class="search-box search-actions">
+            <button id="clear-search" class="small-btn">Clear</button>
+          </div>
         </div>
 
         <table id="snippet-table">
@@ -371,6 +559,7 @@
             <tr>
               <th>Trigger</th>
               <th>Snippet</th>
+              <th>End Code</th>
               <th>Actions</th>
             </tr>
           </thead>
@@ -379,15 +568,30 @@
           </tbody>
         </table>
 
-        <div id="snippet-editor" class="snippet-editor">
+        <div id="snippet-editor" class="snippet-editor" style="display: none;">
           <h3>Edit Snippet</h3>
           <input type="hidden" id="snippet-id">
           
-          <label for="trigger">Trigger:</label>
-          <input type="text" id="trigger" placeholder="Enter trigger word">
+          <label for="trigger">Trigger (max 7 chars):</label>
+          <input type="text" id="trigger" placeholder="Enter trigger word" maxlength="7">
           
-          <label for="snippet-text">Snippet:</label>
-          <textarea id="snippet-text" rows="6"></textarea>
+          <label for="snippet-text">Snippet (max 100 chars):</label>
+          <textarea id="snippet-text" rows="6" maxlength="100"></textarea>
+          <small class="input-help">Press Enter to save, Shift+Enter for new line</small>
+          
+          <label for="end-code">End code:</label>
+          <select id="end-code">
+            <option value="0x0000">-</option>
+            <option value="0x0050">Left</option>
+            <option value="0x004F">Right</option>
+            <option value="0x0052">Up</option>
+            <option value="0x0051">Down</option>
+            <option value="0x0028">Enter</option>
+            <option value="0x002B">Tab</option>
+            <option value="0x004A">Home</option>
+            <option value="0x004D">End</option>
+          </select>
+          <small class="input-help">Keycode to send after the snippet</small>
           
           <div class="action-row">
             <button id="save-snippet">Save</button>
