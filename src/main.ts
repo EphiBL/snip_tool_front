@@ -277,10 +277,61 @@ function encodeString(str: string): number[] {
   return Array.from(Buffer.from(str, 'utf8'));
 }
 
-// Function to parse the HID response into snippets
-function parseSnippetsFromResponse(response: number[] | Buffer): Snippet[] {
-  // Empty template implementation
-  return [];
+// Calculate simple checksum (sum of bytes)
+function calculateChecksum(data: number[]): number {
+  return data.reduce((sum, byte) => (sum + byte) & 0xFF, 0);
+}
+
+// Send data split into packets with proper format
+async function sendDataPackets(dataType: number, data: number[], device: HID.HID): Promise<void> {
+  // Maximum data size per packet
+  const maxDataSize = PACKET_SIZE - 4; // -4 for type, sequence, length, checksum
+  
+  // Number of packets needed
+  const packetCount = Math.ceil(data.length / maxDataSize);
+  
+  for (let i = 0; i < packetCount; i++) {
+    // Create a new packet
+    const packet = new Array(PACKET_SIZE).fill(0);
+    
+    // Set data type (0x05 for trigger, 0x06 for snippet content, 0x07 for end-code)
+    packet[1] = dataType;
+    
+    // Set sequence type
+    if (packetCount === 1) {
+      packet[2] = SEQ.SINGLE; // Single packet (both start and end)
+    } else if (i === 0) {
+      packet[2] = SEQ.START; // Start of a sequence
+    } else if (i === packetCount - 1) {
+      packet[2] = SEQ.END; // End of a sequence
+    } else {
+      packet[2] = SEQ.CONTINUE; // Continuation packet
+    }
+    
+    // Calculate the data slice for this packet
+    const startIndex = i * maxDataSize;
+    const endIndex = Math.min(startIndex + maxDataSize, data.length);
+    const packetData = data.slice(startIndex, endIndex);
+    
+    // Set the length of data in this packet
+    packet[3] = packetData.length;
+    
+    // Copy the data into the packet
+    for (let j = 0; j < packetData.length; j++) {
+      packet[4 + j] = packetData[j];
+    }
+    
+    // Calculate checksum (type + sequence + length + all data)
+    const checksumData = [packet[1], packet[2], packet[3], ...packetData];
+    packet[PACKET_SIZE - 1] = calculateChecksum(checksumData);
+    
+    // Send the packet
+    console.log(`Sending packet: type=${packet[1].toString(16)}, seq=${packet[2].toString(16)}, len=${packet[3]}`);
+    device.write(packet);
+    
+    // Short delay between packets to allow processing
+    await new Promise(resolve => setTimeout(resolve, 50));
+  }
 }
 
 // Get all snippets from local storage
@@ -401,24 +452,120 @@ ipcMain.handle('delete-snippet', async (_, id: number): Promise<{ success: boole
   }
 });
 
-// Send snippets to the keyboard
-ipcMain.handle('flash-snippets-to-keyboard', async (): Promise<{ success: boolean } | { error: string }> => {
+
+// Sync snippets between computer and keyboard
+ipcMain.handle('sync-snippets', async (): Promise<{ success: boolean } | { error: string }> => {
   try {
     if (!connectedDevice || !connectedDevice.device) {
       return { error: 'No device connected' };
     }
     
     if (localSnippets.length === 0) {
-      return { error: 'No snippets to flash' };
+      return { error: 'No snippets to sync' };
     }
     
-    // Here you would implement the logic to send all snippets to the keyboard
-    // This is a placeholder for the actual implementation
-    console.log('Would flash snippets to keyboard:', localSnippets);
+    // Calculate total number of packets needed
+    // First calculate how many bytes each snippet will take
+    const snippetData: { trigger: number[]; text: number[]; endCode: number[] }[] = [];
+    let totalPackets = 0;
     
-    return { success: true };
+    // First packet (command packet) + last packet (end of transfer)
+    totalPackets = 2;
+    
+    // For each snippet, calculate how many packets it will need
+    for (const snippet of localSnippets) {
+      // Encode each part of the snippet
+      const triggerBytes = encodeString(snippet.trigger);
+      const textBytes = encodeString(snippet.text);
+      // Parse endCode from hex string or number
+      const endCodeValue = typeof snippet.endCode === 'string' 
+        ? parseInt(snippet.endCode, 16) 
+        : parseInt(String(snippet.endCode));
+      const endCodeBytes = [endCodeValue & 0xFF, (endCodeValue >> 8) & 0xFF]; // Convert to little-endian byte array
+      
+      // Store the bytes for each snippet
+      snippetData.push({
+        trigger: triggerBytes,
+        text: textBytes,
+        endCode: endCodeBytes
+      });
+      
+      // Each snippet has 3 parts: trigger, content and end-code
+      // Each part needs at least 1 packet
+      // Calculate how many packets each part will need
+      const triggerPackets = Math.ceil(triggerBytes.length / (PACKET_SIZE - 4)); // -4 for header and checksum
+      const textPackets = Math.ceil(textBytes.length / (PACKET_SIZE - 4));
+      const endCodePackets = 1; // End code is always 2 bytes, so 1 packet
+      
+      // Add to total packet count
+      totalPackets += triggerPackets + textPackets + endCodePackets;
+    }
+    
+    console.log(`Sending ${localSnippets.length} snippets in ${totalPackets} packets`);
+    
+    // Create and send the first packet (command packet)
+    const firstPacket = new Array(PACKET_SIZE).fill(0);
+    firstPacket[1] = 0x01; // CommandByte (Update Snippets)
+    firstPacket[2] = 5;    // Length of this packet
+    firstPacket[3] = totalPackets; // Total number of packets
+    firstPacket[4] = localSnippets.length; // Number of snippets
+    
+    // Calculate checksum (sum of bytes 1-4)
+    firstPacket[5] = (firstPacket[1] + firstPacket[2] + firstPacket[3] + firstPacket[4]) & 0xFF;
+    
+    console.log('Sending command packet:', firstPacket.slice(0, 6));
+    connectedDevice.device.write(firstPacket);
+    
+    // Wait for ack (optional, implement based on your protocol)
+    await new Promise(resolve => setTimeout(resolve, 100));
+    
+    // Send each snippet
+    for (let i = 0; i < localSnippets.length; i++) {
+      const snippet = localSnippets[i];
+      const data = snippetData[i];
+      
+      console.log(`Sending snippet ${i+1}/${localSnippets.length}: ${snippet.trigger}`);
+      
+      // Send trigger
+      await sendDataPackets(0x05, data.trigger, connectedDevice.device);
+      
+      // Send text content
+      await sendDataPackets(0x06, data.text, connectedDevice.device);
+      
+      // Send end code
+      await sendDataPackets(0x07, data.endCode, connectedDevice.device);
+    }
+    
+    // Send final packet (end of transfer)
+    const finalPacket = new Array(PACKET_SIZE).fill(0);
+    finalPacket[1] = 0xFF; // End of Transfer
+    
+    console.log('Sending end of transfer packet');
+    connectedDevice.device.write(finalPacket);
+    
+    // Try to read a response with timeout
+    try {
+      const response = connectedDevice.device.readTimeout(5000); // 5 second timeout
+      
+      if (response && response.length > 0) {
+        console.log('Transfer response received:', response);
+        const hexResponse = Array.from(response)
+          .map(byte => byte.toString(16).padStart(2, '0'))
+          .join(' ');
+        console.log('Transfer response (hex):', hexResponse);
+        
+        // Check response status (implement based on your protocol)
+        // For now, just check that we got a response
+        return { success: true };
+      } else {
+        return { error: 'No response received from device after transfer' };
+      }
+    } catch (readError) {
+      console.warn('Transfer response timeout or error:', readError);
+      return { error: 'Device did not respond after transfer' };
+    }
   } catch (error) {
-    console.error('Error flashing snippets to keyboard:', error);
+    console.error('Error syncing snippets with keyboard:', error);
     return { error: (error as Error).message };
   }
 });

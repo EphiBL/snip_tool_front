@@ -16,6 +16,7 @@ interface HidAPI {
   flashSnippetsToKeyboard: () => Promise<any>;
   exportSnippetsToC: (filePath: string) => Promise<any>;
   selectExportDirectory: () => Promise<any>;
+  syncSnippets: () => Promise<any>;
 }
 
 interface DeviceInfo {
@@ -113,20 +114,11 @@ function showStatus(message: string, isError = false): void {
 }
 
 function filterKeyboardDevices(devices: DeviceInfo[]): DeviceInfo[] {
-  // This is a basic filter for keyboard devices
-  // You may need to adjust this based on your specific keyboard's details
+  // Filter for QMK keyboards using the QMK-specific Raw HID usage page 0xFF60
   return devices.filter(device => {
-    // Filter for ZSA Voyager keyboard - adjust vendor/product IDs as needed
-    // ZSA Voyager likely has specific vendorId (common ZSA vendorId might be 0x3297)
     return (
-      // Check for known keyboard-related usage pages
-      (device.usagePage === 1 && device.usage === 6) || // Keyboard
-      // Check for ZSA-specific identifiers if known
-      device.manufacturer?.includes('ZSA') ||
-      device.product?.includes('Voyager') ||
-      // Add any specific vendorId/productId combinations you know
-      // Example: device.vendorId === 0x3297
-      false
+      // Only show devices with QMK Raw HID usage page 0xFF60
+      device.usagePage === 0xFF60
     );
   });
 }
@@ -216,21 +208,6 @@ function showConnectedDeviceInfo(deviceInfo: DeviceInfo): void {
     <p><strong>Release:</strong> ${deviceInfo.release !== undefined ? deviceInfo.release : 'N/A'}</p>
   `;
   
-  // Show a note about Raw HID
-  if (deviceInfo.usagePage === 0xFF00 || deviceInfo.usagePage === 0xFFAB) {
-    deviceDetailsEl.innerHTML += `
-      <p class="note" style="color: var(--secondary-color); margin-top: 15px;">
-        <strong>Note:</strong> This appears to be a Raw HID interface which is likely what you want for QMK custom features.
-      </p>
-    `;
-  } else if (deviceInfo.usagePage === 1 && deviceInfo.usage === 6) {
-    deviceDetailsEl.innerHTML += `
-      <p class="note" style="color: var(--primary-color); margin-top: 15px;">
-        <strong>Note:</strong> This appears to be a standard keyboard interface, which may not support custom commands.
-      </p>
-    `;
-  }
-  
   // Show note about RAW_ENABLE
   deviceDetailsEl.innerHTML += `
     <p class="note" style="color: var(--secondary-color); margin-top: 15px; border-top: 1px solid var(--divider-color); padding-top: 10px;">
@@ -240,7 +217,8 @@ function showConnectedDeviceInfo(deviceInfo: DeviceInfo): void {
   
   // Show/hide relevant sections with smooth transition
   connectedDeviceEl.style.display = 'block';
-  snippetManagerEl.style.display = 'block';
+  // Only show connected device, not the snippet manager
+  snippetManagerEl.style.display = 'none';
   
   // Hide device selection with a small delay for a better transition
   const deviceSelection = document.getElementById('device-selection') as HTMLDivElement;
@@ -258,8 +236,15 @@ function showConnectedDeviceInfo(deviceInfo: DeviceInfo): void {
   pingDeviceBtn.textContent = 'Ping Device';
   pingDeviceBtn.addEventListener('click', pingConnectedDevice);
   
-  // Add the button before the disconnect button
+  // Create sync snippets button
+  const syncSnippetsBtn = document.createElement('button') as HTMLButtonElement;
+  syncSnippetsBtn.id = 'sync-snippets';
+  syncSnippetsBtn.textContent = 'Sync Snippets';
+  syncSnippetsBtn.addEventListener('click', syncSnippets);
+  
+  // Add the buttons before the disconnect button
   actionRow.insertBefore(pingDeviceBtn, disconnectBtn);
+  actionRow.insertBefore(syncSnippetsBtn, disconnectBtn);
 }
 
 async function disconnectFromDevice(): Promise<void> {
@@ -274,6 +259,19 @@ async function disconnectFromDevice(): Promise<void> {
     // Reset UI with transitions
     currentDevice = null;
     
+    // Clean up dynamically created buttons
+    const actionRow = connectedDeviceEl.querySelector('.action-row') as HTMLDivElement;
+    const pingBtn = document.getElementById('ping-device');
+    const syncBtn = document.getElementById('sync-snippets');
+    
+    if (pingBtn) {
+      pingBtn.remove();
+    }
+    
+    if (syncBtn) {
+      syncBtn.remove();
+    }
+    
     // Fade out the current views
     connectedDeviceEl.style.opacity = '0';
     snippetManagerEl.style.opacity = '0';
@@ -282,6 +280,9 @@ async function disconnectFromDevice(): Promise<void> {
       // Hide the elements
       connectedDeviceEl.style.display = 'none';
       snippetManagerEl.style.display = 'none';
+      
+      // Reset opacity for next connection cycle
+      connectedDeviceEl.style.opacity = '1';
       
       // Show the device selection with fade in
       const deviceSelection = document.getElementById('device-selection') as HTMLDivElement;
@@ -644,6 +645,28 @@ async function pingConnectedDevice(): Promise<void> {
     }
   } catch (error) {
     showStatus(`Error pinging device: ${(error as Error).message}`, true);
+  }
+}
+
+// Sync snippets function
+async function syncSnippets(): Promise<void> {
+  try {
+    showStatus('Syncing snippets with keyboard...');
+    
+    const result = await window.hidAPI.syncSnippets();
+    
+    if ('error' in result) {
+      showStatus(`Failed to sync snippets: ${result.error}`, true);
+      return;
+    }
+    
+    if ('success' in result && result.success) {
+      showStatus('Snippets synced successfully!');
+    } else {
+      showStatus('Failed to sync snippets: Unknown error', true);
+    }
+  } catch (error) {
+    showStatus(`Error syncing snippets: ${(error as Error).message}`, true);
   }
 }
 
