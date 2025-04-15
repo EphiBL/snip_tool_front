@@ -33,6 +33,7 @@ interface HidAPI {
   exportSnippetsToC: (filePath: string) => Promise<any>;
   selectExportDirectory: () => Promise<any>;
   syncSnippets: () => Promise<any>;
+  writeToEeprom: () => Promise<any>;
 }
 
 contextBridge.exposeInMainWorld('hidAPI', {
@@ -52,5 +53,6 @@ contextBridge.exposeInMainWorld('hidAPI', {
   flashSnippetsToKeyboard: () => ipcRenderer.invoke('flash-snippets-to-keyboard'),
   exportSnippetsToC: (filePath: string) => ipcRenderer.invoke('export-snippets-to-c', filePath),
   selectExportDirectory: () => ipcRenderer.invoke('select-export-directory'),
-  syncSnippets: () => ipcRenderer.invoke('sync-snippets')
+  syncSnippets: () => ipcRenderer.invoke('sync-snippets'),
+  writeToEeprom: () => ipcRenderer.invoke('write-to-eeprom')
 } as HidAPI);

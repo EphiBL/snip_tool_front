@@ -572,7 +572,7 @@ ipcMain.handle('sync-snippets', async (): Promise<{ success: boolean } | { error
     
     // Create and send the first packet (command packet)
     const firstPacket = new Array(PACKET_SIZE).fill(0);
-    firstPacket[1] = 0x01; // CommandByte (Update Snippets)
+    firstPacket[1] = 0x01; // CommandByte (0x01 = Update Snippets)
     firstPacket[2] = 5;    // Length of this packet
     firstPacket[3] = totalPackets; // Total number of packets
     firstPacket[4] = localSnippets.length; // Number of snippets
@@ -605,7 +605,7 @@ ipcMain.handle('sync-snippets', async (): Promise<{ success: boolean } | { error
     
     // Send final packet (end of transfer)
     const finalPacket = new Array(PACKET_SIZE).fill(0);
-    finalPacket[1] = 0xFF; // End of Transfer
+    finalPacket[1] = 0x11; // End of Transfer
     
     console.log('Sending end of transfer packet');
     connectedDevice.device.write(finalPacket);
@@ -633,6 +633,55 @@ ipcMain.handle('sync-snippets', async (): Promise<{ success: boolean } | { error
     }
   } catch (error) {
     console.error('Error syncing snippets with keyboard:', error);
+    return { error: (error as Error).message };
+  }
+});
+
+// Write snippets to EEPROM
+ipcMain.handle('write-to-eeprom', async (): Promise<{ success: boolean } | { error: string }> => {
+  try {
+    if (!connectedDevice || !connectedDevice.device) {
+      return { error: 'No device connected' };
+    }
+    
+    console.log('Writing to EEPROM...');
+    
+    // Create a simple packet with just 0x02 as first byte
+    const commandPacket = new Array(PACKET_SIZE).fill(0);
+    commandPacket[1] = 0x02; // CommandByte (0x02 = Write to EEPROM)
+    // Other bytes are not relevant and can remain as zeros
+    
+    console.log('Sending EEPROM write command packet:', commandPacket.slice(0, 4));
+    connectedDevice.device.write(commandPacket);
+    
+    // Try to read a response with timeout
+    try {
+      const response = connectedDevice.device.readTimeout(5000); // 5 second timeout
+      
+      if (response && response.length > 0) {
+        console.log('EEPROM write response received:', response);
+        const hexResponse = Array.from(response)
+          .map(byte => byte.toString(16).padStart(2, '0'))
+          .join(' ');
+        console.log('EEPROM write response (hex):', hexResponse);
+        
+        // Verify the first byte of the response is 0xFF
+        if (response[0] === 0xFF) {
+          console.log('EEPROM write confirmed successful (0xFF response)');
+          return { success: true };
+        } else {
+          console.warn('EEPROM write response did not have 0xFF as first byte:', response[0]);
+          return { error: 'Device responded with unexpected data' };
+        }
+      } else {
+        return { error: 'No response received from device after EEPROM write' };
+      }
+    } catch (readError) {
+      console.warn('EEPROM write response timeout or error:', readError);
+      return { error: 'Device did not respond after EEPROM write' };
+    }
+  } catch (error) {
+    console.error('Error writing snippets to EEPROM:', error);
     return { error: (error as Error).message };
   }
 });

@@ -495,6 +495,29 @@
       from { opacity: 0; transform: translateY(-10px); }
       to { opacity: 1; transform: translateY(0); }
     }
+    
+    .info-icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background-color: var(--secondary-color);
+      color: var(--card-bg);
+      font-size: 12px;
+      font-weight: bold;
+      margin-left: 8px;
+      cursor: help;
+      vertical-align: middle;
+      transition: all 0.15s ease;
+    }
+    
+    .info-icon:hover {
+      background-color: var(--secondary-hover);
+      transform: scale(1.1);
+      box-shadow: 0 0 5px rgba(90, 247, 142, 0.5);
+    }
   </style>
 </head>
 <body>
@@ -523,6 +546,7 @@
       <div id="device-details"></div>
       
       <div class="action-row">
+        <button id="write-to-eeprom">Write to EEPROM <span class="info-icon" title="Provides persistent storage of snippets across power-cycles" style="margin-left: 4px; width: 14px; height: 14px; font-size: 10px;">?</span></button>
         <button id="disconnect-device">Disconnect</button>
       </div>
     </div>

@@ -17,6 +17,7 @@ interface HidAPI {
   exportSnippetsToC: (filePath: string) => Promise<any>;
   selectExportDirectory: () => Promise<any>;
   syncSnippets: () => Promise<any>;
+  writeToEeprom: () => Promise<any>;
 }
 
 interface DeviceInfo {
@@ -52,6 +53,7 @@ const refreshBtn = document.getElementById('refresh-devices') as HTMLButtonEleme
 const disconnectBtn = document.getElementById('disconnect-device') as HTMLButtonElement;
 const connectedDeviceEl = document.getElementById('connected-device') as HTMLDivElement;
 const deviceDetailsEl = document.getElementById('device-details') as HTMLDivElement;
+const writeToEepromBtn = document.getElementById('write-to-eeprom') as HTMLButtonElement;
 const snippetManagerEl = document.getElementById('snippet-manager') as HTMLDivElement;
 const manageSnippetsBtn = document.getElementById('manage-snippets') as HTMLButtonElement;
 const addSnippetBtn = document.getElementById('add-snippet') as HTMLButtonElement;
@@ -242,9 +244,12 @@ function showConnectedDeviceInfo(deviceInfo: DeviceInfo): void {
   syncSnippetsBtn.textContent = 'Sync Snippets';
   syncSnippetsBtn.addEventListener('click', syncSnippets);
   
-  // Add the buttons before the disconnect button
-  actionRow.insertBefore(pingDeviceBtn, disconnectBtn);
-  actionRow.insertBefore(syncSnippetsBtn, disconnectBtn);
+  // Add event listener to the Write to EEPROM button
+  writeToEepromBtn.addEventListener('click', writeToEeprom);
+  
+  // Add the buttons before the disconnect button and write-to-eeprom button
+  actionRow.insertBefore(pingDeviceBtn, writeToEepromBtn);
+  actionRow.insertBefore(syncSnippetsBtn, writeToEepromBtn);
 }
 
 async function disconnectFromDevice(): Promise<void> {
@@ -271,6 +276,9 @@ async function disconnectFromDevice(): Promise<void> {
     if (syncBtn) {
       syncBtn.remove();
     }
+    
+    // Remove the event listener from the Write to EEPROM button
+    writeToEepromBtn.removeEventListener('click', writeToEeprom);
     
     // Fade out the current views
     connectedDeviceEl.style.opacity = '0';
@@ -651,7 +659,7 @@ async function pingConnectedDevice(): Promise<void> {
 // Sync snippets function
 async function syncSnippets(): Promise<void> {
   try {
-    showStatus('Syncing snippets with keyboard...');
+    showStatus(`Syncing snippets with keyboard...`);
     
     const result = await window.hidAPI.syncSnippets();
     
@@ -661,12 +669,34 @@ async function syncSnippets(): Promise<void> {
     }
     
     if ('success' in result && result.success) {
-      showStatus('Snippets synced successfully!');
+      showStatus(`Snippets synced successfully!`);
     } else {
       showStatus('Failed to sync snippets: Unknown error', true);
     }
   } catch (error) {
     showStatus(`Error syncing snippets: ${(error as Error).message}`, true);
+  }
+}
+
+// Write to EEPROM function
+async function writeToEeprom(): Promise<void> {
+  try {
+    showStatus(`Writing to EEPROM for persistent storage...`);
+    
+    const result = await window.hidAPI.writeToEeprom();
+    
+    if ('error' in result) {
+      showStatus(`Failed to write to EEPROM: ${result.error}`, true);
+      return;
+    }
+    
+    if ('success' in result && result.success) {
+      showStatus(`Data successfully saved to EEPROM!`);
+    } else {
+      showStatus('Failed to write to EEPROM: Unknown error', true);
+    }
+  } catch (error) {
+    showStatus(`Error writing to EEPROM: ${(error as Error).message}`, true);
   }
 }
 
